@@ -24,102 +24,79 @@
 
     <script type="module">
 
-    import * as THREE from 'three';
-    import { OrbitControls } from 'three/addons/controls/OrbitControls.js'; 
+      // Imports the necessary items
+      import * as THREE from 'three';
+      import { OrbitControls } from 'three/addons/controls/OrbitControls.js'; 
+      import {VRButton} from 'three/addons/webxr/VRButton.js';
+      import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js'; 
 
-    import {VRButton} from 'three/addons/webxr/VRButton.js';
-    import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js'; 
+      // Declares the global variables
+      var scene, camera, renderer, controls, controller, controller2, raycaster, bubbles, light;
+      var baseReferenceSpace, clock, sky, ground, xdir, ydir, zdir;
+      
+      // Sets the values needed to animate the distortion on the bubbles
+      const bubbleUniforms = {
+        uTime: { value: 0 },
+        uDistort: { value: 0.5 }
+      };
 
-    var scene, camera, renderer, controls, controller, controller2, raycaster, bubbles, light;
+      const bubbleMaterial = new THREE.MeshPhysicalMaterial({
+        color: new THREE.Color(0.9, 0.9, 1.0),
+        transmission: 1.05,
+        thickness: -0.5,
+        roughness: 0,
+        iridescence: 1,
+        iridescenceIOR: 1,
+        iridescenceThicknessRange: [0, 1200],
+        clearcoat: 1,
+        clearcoatRoughness: 0,
+        envMapIntensity: 1.5,
+        transparent: true,
+        opacity: 0.5
+      });
 
-    var baseReferenceSpace;
+      // Creates a shader to implement the distortion (heavily inspired by https://codesandbox.io/p/sandbox/focused-kirch-9dyrgh?file=%2Fsrc%2FApp.js%3A2%2C46-2%2C65)
+      bubbleMaterial.onBeforeCompile = (shader) => {
+        shader.uniforms.uTime = bubbleUniforms.uTime;
+        shader.uniforms.uDistort = bubbleUniforms.uDistort;
 
-    var clock, sky, ground, isSelecting;
+        shader.vertexShader = shader.vertexShader
+          .replace(
+            '#include <common>',
+            `
+            #include <common>
 
-    var xdir, ydir, zdir;
+            uniform float uTime;
+            uniform float uDistort;
 
-    const bubbleUniforms = {
-      uTime: { value: 0 },
-      uDistort: { value: 0.5 }
-    };
-
-    const bubbleMaterial = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(0.9, 0.9, 1.0),
-      transmission: 1.05,
-      thickness: -0.5,
-      roughness: 0,
-      iridescence: 1,
-      iridescenceIOR: 1,
-      iridescenceThicknessRange: [0, 1200],
-      clearcoat: 1,
-      clearcoatRoughness: 0,
-      envMapIntensity: 1.5,
-      transparent: true,
-      opacity: 0.5
-    });
-
-    // Inject vertex distortion
-    bubbleMaterial.onBeforeCompile = (shader) => {
-      shader.uniforms.uTime = bubbleUniforms.uTime;
-      shader.uniforms.uDistort = bubbleUniforms.uDistort;
-
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `
-          #include <common>
-
-          uniform float uTime;
-          uniform float uDistort;
-
-          // Simple 3D noise
-          float noise(vec3 p) {
-            return sin(p.x) * sin(p.y) * sin(p.z);
-          }
-          `
-        )
-        .replace(
-          '#include <begin_vertex>',
-          `
-          vec3 transformed = position;
-          float n = noise(normal + uTime * 0.5);
-          transformed += normal * n * uDistort;
-          `
-        );
-    };
+            // Simple 3D noise
+            float noise(vec3 p) {
+              return sin(p.x) * sin(p.y) * sin(p.z);
+            }
+            `
+          )
+          .replace(
+            '#include <begin_vertex>',
+            `
+            vec3 transformed = position;
+            float n = noise(normal + uTime * 0.5);
+            transformed += normal * n * uDistort;
+            `
+          );
+      };
 
       window.onload = function() {
         
         window.THREE = THREE;
 
-        //
-        // THREE.js code goes here!
-        //
-
-        // Create the scene
+        // Creates the scene
         scene = new THREE.Scene();
 
-        // Set up the camera
-        var fov = 75;
-        var ratio = window.innerWidth / window.innerHeight;
-        var zNear = 1;
-        var zFar = 1000;
-
-        camera = new THREE.PerspectiveCamera(fov, ratio, zNear, zFar);
+        // Sets up the camera
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1000);
         camera.position.set(0, 0, 1);
 
-        // Create the renderer and add the canvas
-        renderer = new THREE.WebGLRenderer({antialias:true});
-        renderer.setSize(window.innerWidth, window.innerHeight);
-
-        renderer.xr.enabled = true; 
-        renderer.xr.addEventListener( 'sessionstart', () => baseReferenceSpace = renderer.xr.getReferenceSpace() );
-
-        document.body.appendChild(renderer.domElement);
-
-        document.body.appendChild(VRButton.createButton(renderer));
-
-        // Setup lights
+        // Setsup the lights
         var ambientLight = new THREE.AmbientLight();
         scene.add(ambientLight);
 
@@ -127,48 +104,36 @@
         light.position.set(10, 100, 10);
         scene.add(light);
 
-
-
-        // Background
-
+        // Creates a sky sphere for the background using sky.jpg
         var geometry = new THREE.SphereGeometry( 500, 60, 40 );
         
         var texture = new THREE.TextureLoader().load( 'sky.jpg' );
         var material = new THREE.MeshBasicMaterial( { map: texture,
                                                     side: THREE.BackSide } );
+
         sky = new THREE.Mesh( geometry, material );
+
         scene.add( sky );
 
-
-        // // Configure cube
-        // var geometry = new THREE.BoxGeometry(20, 20, 20);
-        // var material = new THREE.MeshStandardMaterial({color:0xffffff, wireframe:false});
-
-        // var cube = new THREE.Mesh(geometry, material);
-        // // scene.add(cube);
-        
-        // Ground
+        // Creates a plane for the ground
         geometry = new THREE.PlaneGeometry( 10000, 10000 );
+        geometry.rotateX( 3 * Math.PI / 2 );
+
         material = new THREE.MeshStandardMaterial( {
           color: new THREE.Color(0.7, 0.7, 1.0), roughness: 0, metalness: 0.25
         });
 
-        geometry.rotateX( 3 * Math.PI / 2 );
-
         ground = new THREE.Mesh( geometry, material );
-
         ground.translateY(-10);
 
         scene.add( ground );
 
-
-        // Bubbles
-
+        // Creates the bubbles
         bubbles = new THREE.Group();
+
         scene.add(bubbles);
 
         var radius, x, y, z;
-
         for (var i = 0; i < 4000; i++) {
           radius = Math.random() * 5; 
           
@@ -185,8 +150,26 @@
 
           bubbles.add(sphere);
         };
-    
-        // Setup interaction
+
+        // Creates arrays to hold the direction that each bubble is moving in, with a default value of 1
+        xdir = [];
+        ydir = [];
+        zdir = [];
+        for (var i = 0; i < bubbles.children.length; i++){
+          xdir.push(1);
+          ydir.push(1);
+          zdir.push(1);
+        };
+
+        // Creates the renderer, adds the canvas, and sets up for VR compatibility
+        renderer = new THREE.WebGLRenderer({antialias:true});
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true; 
+        renderer.xr.addEventListener( 'sessionstart', () => baseReferenceSpace = renderer.xr.getReferenceSpace() );
+        document.body.appendChild(renderer.domElement);
+        document.body.appendChild(VRButton.createButton(renderer));
+
+        // Setsup camera controlls and disables them when in VR mode
         controls = new OrbitControls(camera, renderer.domElement);
 
         renderer.xr.addEventListener('sessionstart', () => {
@@ -197,74 +180,56 @@
           controls.enabled = true;
         });
 
+        // Iniciallizes the raycaster
         raycaster = new THREE.Raycaster();
 
-        clock = new THREE.Clock();
-
-        window.addEventListener( 'resize', onWindowResize );
-
+        // If the mouse is over a bubble when clicked, pops the bubble
         renderer.domElement.onmousedown = function( e ){
           
-            var pixel_coords = new THREE.Vector2( e.clientX, e.clientY );
+          var pixel_coords = new THREE.Vector2( e.clientX, e.clientY );
 
-            var vp_coords = new THREE.Vector2( 
-                        ( pixel_coords.x / window.innerWidth ) * 2 - 1,  //X
-                        -( pixel_coords.y / window.innerHeight ) * 2 + 1) // Y
+          var vp_coords = new THREE.Vector2( 
+                      ( pixel_coords.x / window.innerWidth ) * 2 - 1,  //X
+                      -( pixel_coords.y / window.innerHeight ) * 2 + 1) // Y
 
-            var vp_coords_near = new THREE.Vector3( vp_coords.x, vp_coords.y, 0);
+          var vp_coords_near = new THREE.Vector3( vp_coords.x, vp_coords.y, 0);
 
-            raycaster.setFromCamera(vp_coords_near, camera);
+          raycaster.setFromCamera(vp_coords_near, camera);
 
-            var intersects = raycaster.intersectObjects(bubbles.children);
+          var intersects = raycaster.intersectObjects(bubbles.children);
 
-            if ( intersects.length > 0 ) {
-              intersects[0].object.visible = false;
-              intersects[0].object.removeFromParent();
-            };
-
-            // update cube position
-            // cube.position.set(intersects[0].point.x, intersects[0].point.y, intersects[0].point.z);
-
+          if ( intersects.length > 0 ) {
+            intersects[0].object.visible = false;
+            intersects[0].object.removeFromParent();
           };
 
-
-          renderer.domElement.onmousemove = function( e ){
-          
-            var pixel_coords = new THREE.Vector2( e.clientX, e.clientY );
-
-            var vp_coords = new THREE.Vector2( 
-                        ( pixel_coords.x / window.innerWidth ) * 2 - 1,  //X
-                        -( pixel_coords.y / window.innerHeight ) * 2 + 1) // Y
-
-            var vp_coords_near = new THREE.Vector3( vp_coords.x, vp_coords.y, 0);
-
-            raycaster.setFromCamera(vp_coords_near, camera);
-
-            var intersects = raycaster.intersectObjects(bubbles.children);
-
-            if ( intersects.length > 0 ) {
-              windPush(intersects[0]);
-            };
-
-            // update cube position
-            // cube.position.set(intersects[0].point.x, intersects[0].point.y, intersects[0].point.z);
-
-            
-          };
-
-        xdir = [];
-        ydir = [];
-        zdir = [];
-
-        for (var i = 0; i < bubbles.children.length; i++){
-          xdir.push(1);
-          ydir.push(1);
-          zdir.push(1);
         };
 
+        // If the mouse moves over a bubble, pushes it away using the normal of the intersecting point
+        renderer.domElement.onmousemove = function( e ){
+          
+          var pixel_coords = new THREE.Vector2( e.clientX, e.clientY );
+
+          var vp_coords = new THREE.Vector2( 
+                      ( pixel_coords.x / window.innerWidth ) * 2 - 1,  //X
+                      -( pixel_coords.y / window.innerHeight ) * 2 + 1) // Y
+
+          var vp_coords_near = new THREE.Vector3( vp_coords.x, vp_coords.y, 0);
+
+          raycaster.setFromCamera(vp_coords_near, camera);
+
+          var intersects = raycaster.intersectObjects(bubbles.children);
+
+          if ( intersects.length > 0 ) {
+            windPush(intersects[0]);
+          };
+          
+        };
+
+        // Sets up the VR controllers, and bubble popping for them
         controller = renderer.xr.getController( 0 );
         controller.addEventListener( 'selectstart', function () {
-					controller.userData.isSelecting = true;
+          controller.userData.isSelecting = true;
 
           raycaster.setFromXRController( controller );
 
@@ -275,31 +240,30 @@
             intersects[0].object.removeFromParent();
           }
         } );
-				controller.addEventListener( 'selectend', function () {
-					controller.userData.isSelecting = false;
+        controller.addEventListener( 'selectend', function () {
+          controller.userData.isSelecting = false;
         } );
         controller.addEventListener( 'connected', function ( event ) {
 
-					const targetRayMode = event.data.targetRayMode;
+          const targetRayMode = event.data.targetRayMode;
 
-					if ( targetRayMode === 'tracked-pointer' || targetRayMode === 'gaze' ) {
+          if ( targetRayMode === 'tracked-pointer' || targetRayMode === 'gaze' ) {
 
-						controller.add( buildController( event.data ) );
+            controller.add( buildController( event.data ) );
 
-					}
+          }
 
-				} );
-				controller.addEventListener( 'disconnected', function () {
+        } );
+        controller.addEventListener( 'disconnected', function () {
 
-					controller.remove( controller.children[ 0 ] );
+          controller.remove( controller.children[ 0 ] );
 
-				} );
+        } );
         scene.add(controller);
-
 
         controller2 = renderer.xr.getController( 1 );
         controller2.addEventListener( 'selectstart', function () {
-					controller2.userData.isSelecting = true;
+          controller2.userData.isSelecting = true;
 
           raycaster.setFromXRController( controller2 );
 
@@ -310,130 +274,144 @@
             intersects[0].object.removeFromParent();
           }
         } );
-				controller2.addEventListener( 'selectend', function () {
-					controller2.userData.isSelecting = false;
+        controller2.addEventListener( 'selectend', function () {
+          controller2.userData.isSelecting = false;
         } );
         controller2.addEventListener( 'connected', function ( event ) {
 
-					const targetRayMode = event.data.targetRayMode;
+          const targetRayMode = event.data.targetRayMode;
 
-					if ( targetRayMode === 'tracked-pointer' || targetRayMode === 'gaze' ) {
+          if ( targetRayMode === 'tracked-pointer' || targetRayMode === 'gaze' ) {
 
-						controller2.add( buildController( event.data ) );
+            controller2.add( buildController( event.data ) );
 
-					}
+          }
 
-				} );
-				controller2.addEventListener( 'disconnected', function () {
+        } );
+        controller2.addEventListener( 'disconnected', function () {
 
-					controller2.remove( controller2.children[ 0 ] );
+          controller2.remove( controller2.children[ 0 ] );
 
-				} );
+        } );
         scene.add(controller2);
+
+        // For use in the animation loop
+        clock = new THREE.Clock();
+
+        // Keeps the scene looking correct even if the screen is resized
+        window.addEventListener( 'resize', onWindowResize );
         
-        // call animation/rendering loop
+        // Calls animation loop
         renderer.setAnimationLoop(animate);
         
       };
 
+      // Resizes the scene to match the window size
       function onWindowResize() {
 
-				camera.aspect = window.innerWidth / window.innerHeight;
-				camera.updateProjectionMatrix();
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
 
-				renderer.setSize( window.innerWidth, window.innerHeight );
+        renderer.setSize( window.innerWidth, window.innerHeight );
 
-			}
+      }
 
+      // Moves the given object randomly in the given directions
       function bob(object, x_direction, y_direction, z_direction) {
 
-				object.position.x += 0.025 * Math.random() * x_direction;
+        object.position.x += 0.025 * Math.random() * x_direction;
         object.position.y += 0.025 * Math.random() * y_direction;
         object.position.z += 0.025 * Math.random() * z_direction;
 
-			}
+      }
 
+      // Pushes an object away from a given intersection
       function windPush(from_this_intersection) {
 
-        var n = from_this_intersection.face.normal.clone();
+        var normal = from_this_intersection.face.normal.clone();
 
-        if (n.x < 0) {
+        if (normal.x < 0) {
           from_this_intersection.object.position.x += 0.30;
         } else {
           from_this_intersection.object.position.x -= 0.30;
         };
 
-        if (n.y > 0) {
+        if (normal.y > 0) {
           from_this_intersection.object.position.y -= 0.30;
         } else {
           from_this_intersection.object.position.y += 0.30;
         };
 
-        if (n.z > 0) {
+        if (normal.z > 0) {
           from_this_intersection.object.position.z -= 0.30;
         } else {
           from_this_intersection.object.position.z += 0.30;
         };
       }
 
+      // Builds a VR controller using the given data
       function buildController( data ) {
 
-				let geometry, material;
+        let geometry, material;
 
-				switch ( data.targetRayMode ) {
+        switch ( data.targetRayMode ) {
 
-					case 'tracked-pointer':
+          case 'tracked-pointer':
 
-						geometry = new THREE.BufferGeometry();
-						geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( [ 0, 0, 0, 0, 0, - 500 ], 3 ) );
-						geometry.setAttribute( 'color', new THREE.Float32BufferAttribute( [ 0.5, 0.5, 0.5, 0, 0, 0 ], 3 ) );
+            geometry = new THREE.BufferGeometry();
+            geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( [ 0, 0, 0, 0, 0, - 500 ], 3 ) );
+            geometry.setAttribute( 'color', new THREE.Float32BufferAttribute( [ 0.5, 0.5, 0.5, 0, 0, 0 ], 3 ) );
 
-						material = new THREE.LineBasicMaterial( { vertexColors: true, blending: THREE.AdditiveBlending } );
+            material = new THREE.LineBasicMaterial( { vertexColors: true, blending: THREE.AdditiveBlending } );
 
-						return new THREE.Line( geometry, material );
+            return new THREE.Line( geometry, material );
 
-					case 'gaze':
+          case 'gaze':
 
-						geometry = new THREE.RingGeometry( 0.02, 0.04, 32 ).translate( 0, 0, - 1 );
-						material = new THREE.MeshBasicMaterial( { opacity: 0.5, transparent: true } );
-						return new THREE.Mesh( geometry, material );
+            geometry = new THREE.RingGeometry( 0.02, 0.04, 32 ).translate( 0, 0, - 1 );
+            material = new THREE.MeshBasicMaterial( { opacity: 0.5, transparent: true } );
+            return new THREE.Mesh( geometry, material );
 
-				}
+        }
 
-			}
+      }
 
+
+      // The animation loop
       function animate() {
 
-        const delta = clock.getDelta();
-
+        // Gets the elapsed time
         var time = clock.getElapsedTime();
 
+        // Updates the time for the bubble defomaiton
         bubbleUniforms.uTime.value = time;
 
+        // Updates the lights color, cylcing through all the hues
+        if (light) {
+          light.color.setHSL(((time/100) % 1), 0.7, 0.9);
+        }
+
+        // If the controllers exist (we are in VR mode), then pushes bubbles away when they intersect
         if (controller) {
           raycaster.setFromXRController( controller );
 
           const intersects = raycaster.intersectObjects( bubbles.children, false );
 
           if ( intersects.length > 0 ) {
-             windPush(intersects[0]);
+              windPush(intersects[0]);
           };
         } 
-
         if (controller2) {
           raycaster.setFromXRController( controller2 );
 
           const intersects = raycaster.intersectObjects( bubbles.children, false );
 
           if ( intersects.length > 0 ) {
-             windPush(intersects[0]);
+              windPush(intersects[0]);
           };
         }
 
-				if (light) {
-          light.color.setHSL(((time/100) % 1), 0.7, 0.9);
-        }
-
+        // Runs the random motion for the bubbles
         for (var i = 0; i < bubbles.children.length; i++){
           if (Math.random() < 0.001) {
             xdir[i] = -xdir[i];
@@ -460,11 +438,9 @@
           };
         };
 
-        // ... update renderer + controls
+        // Updates the renderer and controls
         controls.update();
-
         renderer.render(scene, camera);
-
       };
     </script>
   </head>
